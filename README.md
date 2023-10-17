@@ -1,3 +1,3 @@
 # CBMSTA
-Codes used in CBMSTA project
-![image](https://github.com/haoshijie13/CBMSTA/assets/59014440/4e0b9dca-bd20-453f-be58-c6442529b33a)
+Codes used in CBMSTA project.
+![main2](https://github.com/haoshijie13/CBMSTA/assets/59014440/b811aadb-c938-46cc-b930-8228c412e97c)
