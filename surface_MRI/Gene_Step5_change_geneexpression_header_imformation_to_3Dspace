@@ -1,0 +1,74 @@
+numCPU=50
+myCPU=0
+
+# Merge 2D slices to create a 3D volume
+for i in $(seq -w 1000); do
+    echo $i
+    fslmerge -z gene_00${i}.nii.gz T*/T*-00${i}.nii.gz &
+    let myCPU+=1
+    [[ $((myCPU%${numCPU})) -eq 0 ]] && wait
+done
+
+# Test and reorient
+i=Tmean_miss_gene_1-1000.nii.gz
+
+3dresample -orient LIP -prefix  LIP_${i} -input ${i}
+3drefit -orient LAI LIP_${i}
+3dresample -orient LPI -prefix  LPI_LIP_${i} -input LIP_${i}
+fslcpgeom all_reg_lpi_mask.nii.gz LPI_LIP_${i}
+
+# Process files in the 'gene/' folder
+cd gene/
+
+myCPU=0
+
+# Reorient and fix orientation
+for i in `ls`; do
+    echo $i
+    3dresample -orient LIP -prefix  LIP_${i} -input ${i} &
+    let myCPU+=1
+    [[ $((myCPU%${numCPU})) -eq 0 ]] && wait
+done
+
+myCPU=0
+
+for i in `ls LIP_*`; do
+    echo $i
+    3drefit -orient LAI ${i} &
+    let myCPU+=1
+    [[ $((myCPU%${numCPU})) -eq 0 ]] && wait
+done
+
+myCPU=0
+
+for i in `ls LIP_*`; do
+    echo $i
+    3dresample -orient LPI -prefix  LPI_${i} -input ${i} &
+    let myCPU+=1
+    [[ $((myCPU%${numCPU})) -eq 0 ]] && wait
+done
+
+myCPU=0
+
+for i in `ls LPI_*`; do
+    echo $i
+    fslcpgeom all_reg_lpi_noslice22_mask.nii.gz ${i} &
+    let myCPU+=1
+    [[ $((myCPU%${numCPU})) -eq 0 ]] && wait
+done
+
+# Merge the 2D slices to create a 3D volume
+fslmerge -t gene_all.nii.gz LPI_LIP_gene_00*
+
+# Masking
+fslmaths gene_all.nii.gz -mas macaque_totalRNA_ceb_mask.nii.gz masked_gene_all.nii.gz
+
+# Volume-to-surface mapping
+wb_command -volume-to-surface-mapping masked_gene_all rh.orig.surf.gii masked_gene_all.func.gii -ribbon-constrained rh.orig.surf.gii rh.pial.surf.gii
+
+# Smooth the mapped data
+for i in `ls *.func.gii`; do
+    echo $i
+    wb_command  -metric-smoothing rh.pial.surf.gii  ${i} 1.5 sm15_${i}
+done
+

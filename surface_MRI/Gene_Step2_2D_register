@@ -1,0 +1,115 @@
+# Register images between two nearest 2D slices and merge to 3D
+# Before registration, enlarge and rotate the nifti for better results
+
+# Enlarge: using the 3dZeropad command
+for i in `ls`
+do
+    3dZeropad -LR 1000 -AP 1000 -prefix large_${i} ${i}
+done
+
+# Manually rotate slices using the "mango" software if needed!
+
+# Register using the mask of images
+for i in `ls`
+do
+    fslmaths $i -bin mask_${i}
+done
+
+# Make the midfile (T482) as the reference file name
+cp mask_rotate_large_T482-all.nii.gz reg_mask_rotate_large_T482-all.nii.gz
+
+# Use ANTs to register images (from 483 to 482ref, 483ref to 484ref, 485ref to 486ref, ...)
+for i in `seq 482 518`
+do
+    j=$((i+1))
+    echo $j
+    3dAllineate -warp shift_rotate -base reg_mask_rotate_large_T${i}-all.nii.gz -prefix reg_mask_rotate_large_T${j}-all.nii.gz -1Dparam_save tmp_T${j}.param.1D -noauto -cost ls -onepass -1Dmatrix_save tmp_T${j}.mat.1D mask_rotate_large_T${j}-all.nii.gz
+done
+
+# Use ANTs to register images (from 481 to 482ref, 480ref to 481ref, 479ref to 480ref, ...)
+for i in `seq 424 481`
+do
+    j=$((905-i))
+    x=$((j+1))
+    echo $j $x
+    3dAllineate -warp shift_rotate -base reg_mask_rotate_large_T${x}-all.nii.gz -prefix reg_mask_rotate_large_T${j}-all.nii.gz -1Dparam_save tmp_T${j}.param.1D -noauto -cost ls -onepass -1Dmatrix_save tmp_T${j}.mat.1D mask_rotate_large_T${j}-all.nii.gz
+done
+
+# Apply the 1D transformation files
+
+cd ../file/
+cp rotate_large_T482-all.nii.gz reg_rotate_large_T482-all.nii.gz # Fake reference
+
+for i in `seq 482 518`
+do
+    j=$((i+1))
+    echo $j
+    3dAllineate -base reg_rotate_large_T${i}-all.nii.gz -prefix reg_rotate_large_T${j}-all.nii.gz -overwrite  -1Dmatrix_apply  tmp_T${j}.mat.1D  rotate_large_T${j}-all.nii.gz
+done
+
+for i in `seq 424 481`
+do
+    j=$((905-i))
+    x=$((j+1))
+    echo $j $x
+    3dAllineate -base reg_rotate_large_T${x}-all.nii.gz -prefix reg_rotate_large_T${j}-all.nii.gz -overwrite  -1Dmatrix_apply  tmp_T${j}.mat.1D  rotate_large_T${j}-all.nii.gz
+done
+
+# Merge to check the result
+
+fslmerge -z reg-all.nii.gz reg*
+
+## Register again if needed
+
+# Rename files
+cd ../mask/
+for i in `ls`
+do
+    mv $i ${i/reg_r/r}
+done
+
+cd ../file/
+for i in `ls`
+do
+    mv $i ${i/reg_r/r}
+done
+
+# Register again
+for i in `seq 482 518`
+do
+    j=$((i+1))
+    echo $j
+    3dAllineate -warp shift_rotate -base reg_mask_rotate_large_T${i}-all.nii.gz -prefix reg_mask_rotate_large_T${j}-all.nii.gz -1Dparam_save tmp_T${j}.param.1D -noauto -cost ls -onepass -1Dmatrix_save tmp_T${j}.mat.1D mask_rotate_large_T${j}-all.nii.gz
+done
+
+for i in `seq 424 481`
+do
+    j=$((905-i))
+    x=$((j+1))
+    echo $j $x
+    3dAllineate -warp shift_rotate -base reg_mask_rotate_large_T${x}-all.nii.gz -prefix reg_mask_rotate_large_T${j}-all.nii.gz -1Dparam_save tmp_T${j}.param.1D -noauto -cost ls -onepass -1Dmatrix_save tmp_T${j}.mat.1D mask_rotate_large_T${j}-all.nii.gz
+done
+
+# Apply the 1D transformation files again
+cd ../file/
+cp rotate_large_T482-all.nii.gz reg_rotate_large_T482-all.nii.gz # Fake reference
+
+for i in `seq 482 518`
+do
+    j=$((i+1))
+    echo $j
+    3dAllineate -base reg_rotate_large_T${i}-all.nii.gz -prefix reg_rotate_large_T${j}-all.nii.gz -overwrite  -1Dmatrix_apply  tmp_T${j}.mat.1D  rotate_large_T${j}-all.nii.gz
+done
+
+for i in `seq 424 481`
+do
+    j=$((905-i))
+    x=$((j+1))
+    echo $j $x
+    3dAllineate -base reg_rotate_large_T${x}-all.nii.gz -prefix reg_rotate_large_T${j}-all.nii.gz -overwrite  -1Dmatrix_apply  tmp_T${j}.mat.1D  rotate_large_T${j}-all.nii.gz
+done
+
+# Merge to check the result
+
+fslmerge -z reg-all.nii.gz reg*
+

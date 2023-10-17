@@ -1,0 +1,30 @@
+## Spatial registration
+
+sub=sub-IONm01 
+ses=ses-01 
+blip=LR 
+
+inputdir=${BIDS_preprocessed_fMRI_before}/${sub}/${ses}  
+T2wdir=${BIDS_sourcedata_fMRI}/${sub}/${ses}/anat
+MBMv3dir=${MBM_v3} 
+outputdir=${BIDS_preprocessed_fMRI_after}/${sub}/${ses}; mkdir -p ${outputdir}
+numCPU=8
+
+
+# reg from fMRI to T2w
+fslmerge -t ${outputdir}/Tmean_${blip}.nii.gz  ${inputdir}/${sub}_${ses}_task-rest_run-${blip}-*.nii.gz
+fslmaths ${outputdir}/Tmean_${blip}.nii.gz  -Tmean ${outputdir}/Tmean_${blip}.nii.gz 
+antsRegistrationSyN.sh -d 3 -f ${T2wdir}/${sub}_${ses}_T2w.nii.gz -m ${outputdir}/Tmean_${blip}.nii.gz  -o ${outputdir}/Tmean_${blip}_to_T2w_  -t r  -n $numCPU
+
+#reg from T2w to template
+
+antsRegistrationSyN.sh -d 3 -f ${MBMv3dir}/template_T2w_brain.nii.gz -m ${T2wdir}/${sub}_${ses}_T2w_brain.nii.gz  -o ${outputdir}/T2w_to_template_   -n $numCPU
+
+## fMRI  to template 
+
+foreach -${numCPU} ${inputdir}/${sub}_${ses}_task-rest_run-${blip}-*.nii.gz : antsApplyTransforms -d 3 -e 3 -i IN -r ${MBMv3dir}/template_T2w_brain.nii.gz -o ${outputdir}/PRE -t ${outputdir}/T2w_to_template_1Warp.nii.gz -t ${outputdir}/T2w_to_template_0GenericAffine.mat -t ${outputdir}/Tmean_${blip}_to_T2w_0GenericAffine.mat 
+
+
+#smooth 
+#ResampleImage 3 ${MBMv3dir}/mask_brain.nii.gz ${MBMv3dir}/mask_brain_iso05.nii.gz 0.5x0.5x0.5 0 1
+foreach -${numCPU} ${outputdir}/${sub}_${ses}_task-rest_run-${blip}-*.nii : 3dBlurInMask -input IN -FWHM 1 -mask ${MBMv3dir}/mask_brain.nii.gz -prefix IN  -quiet  -overwrite 

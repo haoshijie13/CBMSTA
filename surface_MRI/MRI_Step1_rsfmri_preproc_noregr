@@ -1,0 +1,77 @@
+
+## Minimal preprcessing (noregr) pipepline involves 1) despike (3dDespike), 2) slice-timing correcti## without global signal regressionon (3dTshift), 3) motion correction (3dvolreg), 4) EPI distortion correction (topup)
+
+sub=sub-IONm01 
+ses=ses-01 
+inputdir=${BIDS_sourcedata_fMRI}/${sub}/${ses} 
+outputdir=${BIDS_preprocessed_fMRI_after}/${sub}/${ses}; mkdir -p ${outputdir} 
+tmpdir=/tmp/${sub}/${ses}; mkdir -p ${tmpdir}
+
+topup_datain_RL=${pipeline_dir}/connectome_acq_param_blip_per2tp_RL.txt
+topup_datain_LR=${pipeline_dir}/connectome_acq_param_blip_per2tp_LR.txt
+topup_config=${pipeline_dir}/b02b0_marmoset.cnf
+tpattern=altplus
+TR=2
+numCPU=8 
+
+# environment variable
+export OMP_NUM_THREADS=${numCPU}
+export ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=${numCPU}
+export FSLOUTPUTTYPE=NIFTI  ## dont change the format
+
+#copy data to tmp folder
+cp ${inputdir}/func/*task-rest_run*.nii.gz ${tmpdir}
+gzip -d -f ${tmpdir}/*.nii.gz
+
+#despike 
+foreach -${numCPU}  ${tmpdir}/*task-rest_run*.nii : 3dDespike -NEW -nomask -prefix ${tmpdir}/PRE-despike.nii IN -overwrite
+
+
+#shift 
+foreach -${numCPU} ${tmpdir}/*-despike.nii : 3dTshift -TR ${TR}s -Fourier -tpattern ${tpattern} -prefix ${tmpdir}/PRE-tshift.nii IN -overwrite
+
+#volreg (two round)
+3dbucket -prefix ${tmpdir}/RL-vr-base.nii ${tmpdir}/${sub}_${ses}_task-rest_run-RL-1-despike-tshift.nii"[0]" -overwrite
+3dbucket -prefix ${tmpdir}/LR-vr-base.nii ${tmpdir}/${sub}_${ses}_task-rest_run-LR-1-despike-tshift.nii"[0]" -overwrite
+
+foreach -${numCPU} ${tmpdir}/*-RL-*-tshift.nii : 3dvolreg -zpad 5 -base ${tmpdir}/RL-vr-base.nii -prefix ${tmpdir}/PRE-volreg.nii -1Dfile ${tmpdir}/PRE-volreg.1D -Fourier  -overwrite IN
+foreach -${numCPU} ${tmpdir}/*-LR-*-tshift.nii : 3dvolreg -zpad 5 -base ${tmpdir}/LR-vr-base.nii -prefix ${tmpdir}/PRE-volreg.nii -1Dfile ${tmpdir}/PRE-volreg.1D -Fourier  -overwrite IN
+
+fslmerge -t ${tmpdir}/RL-vr-base.nii  ${tmpdir}/*-RL-*-tshift-volreg.nii
+fslmerge -t ${tmpdir}/LR-vr-base.nii ${tmpdir}/*-LR-*-tshift-volreg.nii
+
+fslmaths ${tmpdir}/RL-vr-base.nii -Tmean ${tmpdir}/RL-vr-base.nii
+fslmaths ${tmpdir}/LR-vr-base.nii -Tmean ${tmpdir}/LR-vr-base.nii
+
+foreach -${numCPU} ${tmpdir}/*-RL-*-tshift.nii : 3dvolreg -zpad 5 -base ${tmpdir}/RL-vr-base.nii -prefix ${tmpdir}/PRE-volreg.nii -1Dfile ${tmpdir}/PRE-volreg.1D -Fourier  -overwrite IN
+foreach -${numCPU} ${tmpdir}/*-LR-*-tshift.nii : 3dvolreg -zpad 5 -base ${tmpdir}/LR-vr-base.nii -prefix ${tmpdir}/PRE-volreg.nii -1Dfile ${tmpdir}/PRE-volreg.1D -Fourier  -overwrite IN
+
+#topup
+cp ${inputdir}/func/${sub}_${ses}_task-rest_SEEPI-RL.nii.gz ${tmpdir}/SEEPI-RL.nii.gz
+cp ${inputdir}/func/${sub}_${ses}_task-rest_SEEPI-LR.nii.gz ${tmpdir}/SEEPI-LR.nii.gz
+
+#preprocess SEEPI for RL
+3dvolreg -zpad 5 -base ${tmpdir}/RL-vr-base.nii -prefix ${tmpdir}/SEEPI-RLLR-RL.nii -Fourier -overwrite ${tmpdir}/SEEPI-RL.nii.gz
+fslmaths ${tmpdir}/SEEPI-RLLR-RL.nii -Tmean ${tmpdir}/SEEPI-RLLR-RL.nii
+3dvolreg -zpad 5 -base  ${tmpdir}/SEEPI-RLLR-RL.nii  -prefix  ${tmpdir}/SEEPI-RLLR-LR.nii -Fourier -overwrite ${tmpdir}/SEEPI-LR.nii.gz
+fslmaths  ${tmpdir}/SEEPI-RLLR-LR.nii  -Tmean  ${tmpdir}/SEEPI-RLLR-LR.nii 
+fslmerge -t ${tmpdir}/SEEPI-RLLR.nii ${tmpdir}/SEEPI-RLLR-RL.nii ${tmpdir}/SEEPI-RLLR-LR.nii 
+
+#preprocess SEEPI for LR
+3dvolreg -zpad 5 -base ${tmpdir}/LR-vr-base.nii -prefix ${tmpdir}/SEEPI-LRRL-LR.nii -Fourier -overwrite ${tmpdir}/SEEPI-LR.nii.gz
+fslmaths ${tmpdir}/SEEPI-LRRL-LR.nii -Tmean ${tmpdir}/SEEPI-LRRL-LR.nii
+3dvolreg -zpad 5 -base  ${tmpdir}/SEEPI-LRRL-LR.nii  -prefix  ${tmpdir}/SEEPI-LRRL-RL.nii -Fourier -overwrite ${tmpdir}/SEEPI-RL.nii.gz
+fslmaths  ${tmpdir}/SEEPI-LRRL-RL.nii  -Tmean  ${tmpdir}/SEEPI-LRRL-RL.nii
+fslmerge -t ${tmpdir}/SEEPI-LRRL.nii ${tmpdir}/SEEPI-LRRL-LR.nii ${tmpdir}/SEEPI-LRRL-RL.nii
+
+#topup for LR
+topup --imain=${tmpdir}/SEEPI-LRRL.nii --datain=${topup_datain_LR} --config=${topup_config} --out=${tmpdir}/SEEPI-LRRL-topup-results --fout=${tmpdir}/SEEPI-LRRL-fout --iout=${tmpdir}/SEEPI-LRRL-iout 
+#topup for RL
+topup --imain=${tmpdir}/SEEPI-RLLR.nii --datain=${topup_datain_RL} --config=${topup_config} --out=${tmpdir}/SEEPI-RLLR-topup-results --fout=${tmpdir}/SEEPI-RLLR-fout --iout=${tmpdir}/SEEPI-RLLR-iout
+
+#applytopup for LR
+foreach -${numCPU} ${tmpdir}/*-RL-*-volreg.nii : applytopup --imain=IN  --datain=${topup_datain_RL} --method=jac --inindex=1 --topup=${tmpdir}/SEEPI-RLLR-topup-results --out=${outputdir}/PRE-topup.nii.gz
+
+#applytopup for RL
+foreach -${numCPU} ${tmpdir}/*-LR-*-volreg.nii : applytopup --imain=IN  --datain=${topup_datain_LR} --method=jac --inindex=1 --topup=${tmpdir}/SEEPI-LRRL-topup-results --out=${outputdir}/PRE-topup.nii.gz
+

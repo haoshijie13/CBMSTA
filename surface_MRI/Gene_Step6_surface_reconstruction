@@ -1,0 +1,96 @@
+##reconstruction of spatial transcriptomic cerebellar cortex surface
+
+# Set FreeSurfer environment variables
+export FREESURFER_HOME=/usr/local/freesurfer
+export SUBJECTS_DIR=data_path/
+source $FREESURFER_HOME/SetUpFreeSurfer.sh
+
+subject=macaque
+
+# Resample images for better resolution
+ResampleImage 3 macaque_ceb.nii.gz macaque_ceb_iso005.nii.gz 0.05x0.05x0.05
+ResampleImage 3 macaque_ceb_wm_mask.nii.gz macaque_ceb_wm_mask_iso005.nii.gz 0.05x0.05x0.05 0 1
+ResampleImage 3 macaque_ceb_gm_mask.nii.gz macaque_ceb_gm_mask_iso005.nii.gz 0.05x0.05x0.05 0 1
+mv macaque_ceb_wm_mask_iso005.nii.gz wm.nii.gz
+mv macaque_ceb_gm_mask_iso005.nii.gz gm.nii.gz
+
+
+F=2
+r=0.1
+
+# Change header file information
+3dresample -orient RSP  -prefix wm_RSP.nii.gz -insert wm.nii.gz -overwrite
+3dresample -orient RSP  -prefix gm_RSP.nii.gz -insert gm.nii.gz -overwrite
+3drefit -xorigin_raw 0 -yorigin_raw 0 -zorigin_raw 0 wm_RSP.nii.gz
+3drefit -xorigin_raw 0 -yorigin_raw 0 -zorigin_raw 0 gm_RSP.nii.gz
+3drefit -xorigin 29.975 -yorigin 29.975 -zorigin 8.474998 wm_RSP.nii.gz
+3drefit -xorigin 29.975 -yorigin 29.975 -zorigin 8.474998 gm_RSP.nii.gz
+
+# Resample and rename
+mri_convert  wm_RSP.nii.gz wm_RSP_01.nii.gz -iis 0.1 -ijs 0.1 -iks 0.1
+mri_convert  gm_RSP.nii.gz gm_RSP_01.nii.gz
+mv wm.nii.gz wm_or.nii.gz
+mv gm.nii.gz gm_or.nii.gz
+mv  wm_RSP_01.nii.gz wm.nii.gz
+mv  gm_RSP_01.nii.gz gm.nii.gz
+
+# Create fake T1
+fslmaths wm.nii.gz -bin -mul 110 wm.nii.gz
+fslmaths gm.nii.gz -bin -mul 80 gm.nii.gz
+fslmaths wm.nii.gz -bin -mul 127 filled.nii.gz
+fslmaths wm.nii.gz -bin -sub 1 -abs -bin wm_rev.nii.gz
+fslmaths gm.nii.gz -mas wm_rev.nii.gz gm.nii.gz
+fslmaths wm.nii.gz -add gm.nii.gz fake_T1.nii.gz
+fslmaths fake_T1.nii.gz -bin brainmask.nii.gz
+
+# Apply different smoothing (F)
+3dBlurInMask -input fake_T1.nii.gz -FWHM $F -mask brainmask.nii.gz -prefix  fake_T1_sm2.nii.gz 
+
+# Convert to mgz
+cp fake_T1_sm2.nii.gz orig.nii.gz
+cp fake_T1_sm2.nii.gz norm.nii.gz
+mri_convert wm.nii.gz wm.mgz
+mri_convert filled.nii.gz filled.mgz
+mri_convert  brainmask.nii.gz brainmask.mgz
+mri_convert norm.nii.gz norm.mgz
+mri_convert fake_T1_sm2.nii.gz fake_T1_sm2.mgz
+
+# Create orig surface
+mri_pretess filled.mgz 127 norm.mgz filled-pretess127.mgz
+mri_tessellate filled-pretess127.mgz 127 rh.orig.nofix
+mris_extract_main_component rh.orig.nofix rh.orig
+cp rh.orig ../surf/rh.orig
+
+# Create pial surface
+mris_make_surfaces  -max 50000  -r ${r} -max_csf 0.1  -min_gray_at_csf_border 1   -orig_white orig -orig_pial orig   -noaseg   -noaparc -mgz -T1 fake_T1_sm2 ${subject} rh
+
+# Alternative method for pial surface
+mris_convert rh.orig rh.orig.surf.gii
+SurfMesh -i_gii rh.orig.surf.gii  -o_gii rh.orig_03.surf.gii -edges 0.3
+mris_expand rh.orig_03.surf.gii 1 rh.orig_03_ex1.surf.gii
+mris_expand rh.orig_03.surf.gii -0.6 rh.orig_03_ex-06.surf.gii
+
+# Register surfaces to original space
+cp rh.orig_03_ex1.surf.gii rh.pial.surf.gii
+cp rh.orig_03_ex-06.surf.gii rh.orig.surf.gii
+ConvertSurface -i rh.orig.surf.gii -o rh.orig_scale05.gii -xmat_1D scale0.5.1D
+ConvertSurface -i rh.pial.surf.gii -o rh.pial_scale05.gii -xmat_1D scale0.5.1D
+
+3dcopy wm.nii.gz test_wm.nii.gz
+3drefit -xdel 0.05 -ydel 0.05 -zdel 0.05 -keepcen test_wm.nii.gz
+@Align_Centers -cm -base wm_or.nii.gz -dset test_wm.nii.gz
+ConvertSurface -i rh.orig_scale05.gii -o rh.orig_scale05_shifti.gii -ixmat_1D test_wm_shft.1D
+ConvertSurface -i rh.pial_scale05.gii -o rh.pial_scale05_shifti.gii -ixmat_1D test_wm_shft.1D
+
+# Smooth the surfaces
+mris_smooth -a 2 -n 2  rh.pial_scale05_shifti.gii rh.pial_scale05_shifti_sm.surf.gii
+mris_smooth -a 2 -n 2  rh.orig_scale05_shifti.gii rh.o_scale05_shifti_sm.surf.gii
+
+# Map volume NIFTI data to surface
+wb_command -volume-to-surface-mapping input_volume.nii.gz  rh.pial_scale05_shifti_sm.surf.gii input_volume.func.gii  -ribbon-constrained  rh.o_scale05_shifti_sm.surf.gii rh.pial_scale05_shifti_sm.surf.gii
+
+# Smooth the mapped data
+wb_command  -metric-smoothing rh.pial_scale05_shifti_sm.surf.gii  input_volume.func.gii 0.5 sm05_input_volume.func.gii
+
+# open surface file and view the mapping results in the wb_view
+

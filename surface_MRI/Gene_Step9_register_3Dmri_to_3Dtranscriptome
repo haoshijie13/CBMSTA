@@ -1,0 +1,31 @@
+## use the  antsRegistrationSyN.sh to register the MRI data to transcriptomic data
+
+# Combine ROI and wm
+fslmaths MRI_ceb_ROI.nii.gz -add MRI_ceb_wm.nii.gz MRI_ceb_ROI_wm.nii.gz
+
+# Register MRI to transcriptomic data using antsRegistrationSyN.sh
+antsRegistrationSyN.sh -d 3 -m MRI_ceb_ROI_wm.nii.gz -f Tran_ceb_ROI_wm.nii.gz -o ants1_ -n 16
+
+# Apply transformation
+antsApplyTransforms -d 3 -i MRI_ceb.nii.gz -r Tran_ceb_ROI.nii.gz \
+-t ants1_1Warp.nii.gz -t ants1_0GenericAffine.mat -o MRI_ceb_to_tran.nii.gz
+
+# Register to template
+antsRegistrationSyN.sh -d 3 -m MRI_ceb_to_tran.nii.gz -f Tran_ceb.nii.gz -o ants2_ -n 16
+
+# Apply transformation to gradient data
+wb_command -metric-to-volume-mapping MRI_ceb_gradient1.func.gii rh.pial.surf.gii \
+MRI_ceb.nii.gz MRI_ceb_gradient1.nii.gz
+
+antsApplyTransforms -d 3 -i MRI_ceb_gradient1.nii.gz -r Tran_ceb.nii.gz \
+-t ants1_1Warp.nii.gz -t ants1_0GenericAffine.mat \
+-t ants2_1Warp.nii.gz -t ants2_0GenericAffine.mat \
+-o MRI_ceb_gradient1_to_tran.nii.gz
+
+# Map gradient data to surface
+wb_command -volume-to-surface-mapping MRI_ceb_gradient1_to_tran.nii.gz rh.pial_tran.surf.gii \
+MRI_ceb_gradient1_to_tran.func.gii -ribbon-constrained rh.orig_tran.surf.gii rh.pial_tran.surf.gii
+
+# Smooth the mapped data
+wb_command -metric-smoothing rh.pial_tran.surf.gii MRI_ceb_gradient1_to_tran.func.gii 0.5 sm05_MRI_ceb_gradient1_to_tran.func.gii
+

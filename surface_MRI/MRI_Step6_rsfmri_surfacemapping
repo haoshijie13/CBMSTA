@@ -1,0 +1,22 @@
+
+# Map volume NIfTI data to surface Gifti space
+
+for i in `ls *nii.gz`
+do
+    # Use wb_command to perform volume-to-surface mapping and save the result as a .func.gii file
+    wb_command -volume-to-surface-mapping $i  rh.pial.surf.gii ${i}.func.gii  -ribbon-constrained  rh.orig.surf.gii rh.pial.surf.gii
+done
+
+# Smooth the data
+
+for i in `ls *.func.gii`
+do
+    echo $i  # Print the current file being processed
+    
+    # Use wb_command to perform metric smoothing and save the result
+
+    wb_command  -metric-smoothing rh.pial.surf.gii  ${i} 0.5 sm05_${i}
+done
+
+# Open the surface file and view the mapping results in wb_view
+

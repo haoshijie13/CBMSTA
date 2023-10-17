@@ -1,0 +1,28 @@
+# Set FreeSurfer environment variables
+export FREESURFER_HOME=/usr/local/freesurfer
+export SUBJECTS_DIR=/mnt/mri/iso008
+source $FREESURFER_HOME/SetUpFreeSurfer.sh
+
+# Convert surface files to Gifti format
+mris_convert rh.pial rh.pial.surf.gii
+mris_convert rh.orig rh.orig.surf.gii
+
+# Scale and convert surface files
+ConvertSurface -i rh.orig.surf.gii -o rh.orig_scale008.gii -xmat_1D scale0.8.1D
+ConvertSurface -i rh.pial.surf.gii -o rh.pial_scale008.gii -xmat_1D scale0.8.1D
+
+# Copy and adjust white matter NIfTI data
+3dcopy wm.nii.gz test_wm.nii.gz
+3drefit -xdel 0.08 -ydel 0.08 -zdel 0.08 -keepcen test_wm.nii.gz
+
+# Align centers using @Align_Centers
+@Align_Centers -cm -base wm_or.nii.gz -dset test_wm.nii.gz
+
+# Apply surface adjustments
+ConvertSurface -i rh.orig_scale008.gii -o rh.orig_scale008_shifti.gii -ixmat_1D test_wm_shft.1D
+ConvertSurface -i rh.pial_scale008.gii -o rh.pial_scale008_shifti.gii -ixmat_1D test_wm_shft.1D
+
+# Rename and replace surface files
+mv rh.orig_scale008_shifti.gii rh.orig.surf.gii
+mv rh.pial_scale008_shifti.gii rh.pial.surf.gii
+
